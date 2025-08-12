@@ -81,14 +81,14 @@ def main():
     )
 
     # 2) 生成トリガー
-    model = "gpt-5-mini"
+    model = "gpt-5-nano"
     if st.button("解説を生成"):
         if not challenge.strip():
             st.error("まずは課題文を入力してください。")
             return
 
-        if len(challenge) > 500:
-            st.error("課題文は500文字以内にしてください。")
+        if len(challenge) > 1000:
+            st.error("課題文は1000文字以内にしてください。")
             return
 
         # 入力文がコーディング課題かどうかをチェックする
@@ -110,7 +110,7 @@ def main():
             try:
                 resp1 = client.responses.create(
                     model=model,
-                    max_output_tokens=5000,
+                    max_output_tokens=10000,
                     input=f"{BASE_PROMPT}\n[課題]\n{challenge}"
                 )
                 st.session_state.explanation_md = resp1.output_text
@@ -123,7 +123,7 @@ def main():
             try:
                 resp2 = client.responses.create(
                     model=model,
-                    max_output_tokens=5000,
+                    max_output_tokens=10000,
                     input=(f"{NOTEBOOK_PROMPT}\n[マークダウン記事]\n"
                            f"{st.session_state.explanation_md}")
                 )
