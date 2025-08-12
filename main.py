@@ -2,10 +2,22 @@
 
 import os
 import re
+import json
 import streamlit as st
 from openai import OpenAI
 
+# プロンプトファイルから読み込み
+try:
+    from prompts import (
+        INPUT_CHECK_PROMPT,
+        BASE_PROMPT,
+        NOTEBOOK_PROMPT
+    )
+except ImportError:
+    st.error("prompts.py ファイルが見つかりません")
+    st.stop()
 
+# --- 両対応APIキー取得 ---
 API_KEY = None
 try:
     from dotenv import load_dotenv
@@ -30,27 +42,6 @@ if not API_KEY:
 client = OpenAI(api_key=API_KEY)
 
 
-# 入力がコーディング課題かどうかをチェック
-INPUT_CHECK_PROMPT = """
-あなたは優秀なPython講師です。
-ユーザーの入力が、コーディングの課題かどうかをチェックしてください。
-コーディングの課題であれば、「yes」と返答してください。
-"""
-
-# ベースプロンプト（解説記事用）
-BASE_PROMPT = """
-あなたは優秀なPython講師です。
-以下の課題を初心者向けに step by step で動作確認しながらコードを完成させる手順を解説する
-ブログ記事を、マークダウン形式で書いてください。
-"""
-
-# Notebook 生成用プロンプト
-NOTEBOOK_PROMPT = """
-以下のマークダウン記事を、Google Colab で動作確認できる Notebook 形式（.ipynb）の JSON として出力してください。
-出力は純粋な JSON のみとし、余計なテキストを含めないようにしてください。
-"""
-
-
 def extract_pure_json(text: str) -> str | None:
     """ API 応答から Notebook JSON 部分だけを抽出する """
     m = re.search(r"```json\s*([\s\S]*?)\s*```", text)
@@ -60,6 +51,18 @@ def extract_pure_json(text: str) -> str | None:
     if m2:
         return m2.group(1)
     return None
+
+
+def validate_notebook_json(json_str: str) -> tuple[bool, list[str]]:
+    """生成されたJSONが正しい.ipynb形式かチェックし、不足しているキーを返す"""
+    try:
+        data = json.loads(json_str)
+        required_keys = ["cells", "metadata", "nbformat", "nbformat_minor"]
+        missing_keys = [key for key in required_keys if key not in data]
+        is_valid = len(missing_keys) == 0
+        return is_valid, missing_keys
+    except Exception:
+        return False, ["JSON形式が不正です"]
 
 
 def main():
@@ -78,14 +81,14 @@ def main():
     )
 
     # 2) 生成トリガー
-    model = "gpt-4.1-nano"
+    model = "gpt-5-nano"
     if st.button("解説を生成"):
         if not challenge.strip():
             st.error("まずは課題文を入力してください。")
             return
 
-        if len(challenge) > 500:
-            st.error("課題文は500文字以内にしてください。")
+        if len(challenge) > 1000:
+            st.error("課題文は1000文字以内にしてください。")
             return
 
         # 入力文がコーディング課題かどうかをチェックする
@@ -107,7 +110,7 @@ def main():
             try:
                 resp1 = client.responses.create(
                     model=model,
-                    max_output_tokens=5000,
+                    max_output_tokens=10000,
                     input=f"{BASE_PROMPT}\n[課題]\n{challenge}"
                 )
                 st.session_state.explanation_md = resp1.output_text
@@ -120,11 +123,25 @@ def main():
             try:
                 resp2 = client.responses.create(
                     model=model,
-                    max_output_tokens=5000,
+                    max_output_tokens=10000,
                     input=(f"{NOTEBOOK_PROMPT}\n[マークダウン記事]\n"
                            f"{st.session_state.explanation_md}")
                 )
-                st.session_state.notebook_json = extract_pure_json(resp2.output_text)
+                notebook_json = extract_pure_json(resp2.output_text)
+                
+                # JSONの検証
+                if notebook_json:
+                    is_valid, missing_keys = validate_notebook_json(notebook_json)
+                    st.session_state.notebook_json = notebook_json
+                    
+                    if not is_valid:
+                        st.warning("⚠️ Notebook JSONの形式に問題があります。")
+                        st.info(f"不足しているキー: {', '.join(missing_keys)}")
+                        st.info("ダウンロードは可能ですが、Google Colabでの実行に問題がある可能性があります。")
+                else:
+                    st.error("Notebook JSON の抽出に失敗しました。")
+                    return
+                    
             except Exception as e:
                 st.error(f"APIエラー: {e}")
                 return
@@ -154,7 +171,8 @@ def main():
             mime="application/json",
             key="ipynb_download"
         )
-    elif st.session_state.explanation_md and not st.session_state.notebook_json:
+    elif (st.session_state.explanation_md and 
+          not st.session_state.notebook_json):
         st.error("Notebook JSON の抽出に失敗しました。")
 
 
