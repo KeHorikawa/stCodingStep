@@ -9,7 +9,7 @@ __pycache__/
 *.pyc
 
 # VS Code Dev Container
-# .devcontainer/
+.devcontainer/
 
 # Python関連
 *.py[cod]
